@@ -1,0 +1,8 @@
+grant{
+	permission java.util.PropertyPermission "*", "read";
+	permission java.io.FilePermission "c3402.sqlite", "read, write";
+	permission java.lang.RuntimePermission "loadLibrary.*";
+	permission java.io.FilePermission ".", "read";
+	permission java.io.FilePermission "-", "read";
+	permission java.io.FilePermission "${java.io.tmpdir}-", "read, write, delete";
+};

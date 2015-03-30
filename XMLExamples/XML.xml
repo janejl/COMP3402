@@ -1,0 +1,72 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+ <?xml-stylesheet type="text/xsl" ref="mystylesheet.xsl"?> <!-- processing instruction -->
+ 
+<Weather> <!-- must hv a root element be the parent of all elements. -->
+ 
+<WeatherForcast>
+	<City ID = "1" name = "Hong Kong">
+		<Weather date = "2015-02-10">Light Rain</Weather>
+		<Weather date = "2015-02-11">Sunny</Weather>
+	</City>
+	<City ID = "2" name = "Fujian">
+		<Weather date = "2015-02-10">Cloudy</Weather>
+		<Weather date = "2015-02-11">Thunder Storm</Weather>
+	</City>
+</WeatherForcast>
+
+
+
+<!-- element with no content but attributes -->
+<forecast_conditions> 
+	<day_of_week data = "Mon"/> 
+	<low data = "63"/> 
+	<high data = "66"/>
+</forecast_conditions>
+
+
+
+<!-- unparsed char data -->
+<code> 
+	<![CDATA[
+	int function(a, b){
+		if(a<b && b>0)
+			return 1;
+	}
+	]]>
+</code>
+
+
+
+<!-- XML namespace -->
+<catalog
+	xmlns = "http://www.baidu.com" 
+	xmlns:d = "http://www.google.com"> 
+
+	<c:notebook xmlns:c = "http://www.cs.hku.hk/~c0322/computer">
+		<c:model>Thinkpad</c:model> <!-- all child elements must add prefix -->
+		<c:vendor>Lenovo</c:vendor>
+	</c:notebook>
+	
+	<s:notebook xmln:s = "h%p://www.cs.hku.hk/~c0322/staAonary">
+		<s:type>ruled</s:type>
+		<s:pages>100</s:pages>
+	</s:notebook>
+	
+	<notebook> <!-- default namespace -->
+		<baidu>123</baidu>
+		<search>baidu</search>
+	</notebook>
+	
+	<d:notebook>
+		<d:google>123</d:google>
+		<d:search>google</d:search>
+	</d:notebook>
+	
+	<notebook>
+		<baidu>A &lt; B</baidu>
+	</notebook>
+</catalog>
+
+
+
+</Weather>

@@ -1,0 +1,407 @@
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.rmi.*;
+import java.rmi.server.*;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Random;
+import java.util.Scanner;
+
+@SuppressWarnings("serial")
+public class JPoker24GameServer extends UnicastRemoteObject implements GameServer{
+	
+	private int numOfClients;
+	private int startTime;
+	private Connection conn;
+	private static final String DB_FILE = "jpoker24game.sqlite"; // connection to a DB
+	
+	public static void main(String[] args){
+		try{
+			JPoker24GameServer app = new JPoker24GameServer();
+			System.setSecurityManager(new SecurityManager());
+			
+			/* Bind the remote object app to the rmiregistry using Naming.rebind(). 
+			 * The name registered ("Server") will be used by clients when look up in the rmi registry.
+			 */
+			Naming.rebind("Server", app);
+			System.out.println("Service registered!");
+		}catch (Exception e){
+			System.err.println("[Server main]Exception thrown: "+e);
+		}
+	}
+	
+	// Show that RemoteException is thrown by super
+	protected JPoker24GameServer() throws RemoteException, SQLException, InstantiationException, IllegalAccessException, ClassNotFoundException{
+		super();
+		numOfClients = 0;
+		startTime = (int) (System.currentTimeMillis()/1000);
+		
+		//Set up JDBC driver
+		Class.forName("org.sqlite.JDBC").newInstance();
+		conn = DriverManager.getConnection("jdbc:sqlite:"+DB_FILE);
+	}
+	
+	/* User profile service: display user's info: name, win#, game#, avg(winning time), rank
+	 * 
+	 */
+	public HashMap<Integer, String> userProfileService(String user_name) throws RemoteException{
+		HashMap<Integer, String> profileMap = new HashMap<Integer, String>();
+		try{
+			String sql = "SELECT u2.userName, u2.loginTime, u2.gamePlayed," + 
+								"COUNT(w2.winTime) as win, AVG(w2.winTime) as avgWin," +
+								"(SELECT COUNT(*)" +
+								"FROM (SELECT u1.userName as name, COUNT(w1.winTime) as win," + 
+												"u1.gamePlayed, AVG(w1.winTime) as avgWin" +
+									  "FROM userinfo AS u1 LEFT JOIN winhistory AS w1 ON u1.userName=w1.userName" + 
+									  "GROUP BY u1.userName) t1" +
+								"WHERE (t1.win > count(w2.winTime)) OR" +
+									  "(t1.win = count(w2.winTime) AND" +
+									  "t1.gamePlayed < u2.gamePlayed) OR" +
+									  "t1.win = count(w2.winTime) AND" +
+									  "t1.gamePlayed = u2.gamePlayed AND" +
+									  "t1.avgWin < AVG(w2.winTime)))+1 as RANK" +
+						 "FROM userinfo AS u2 LEFT JOIN winhistory AS w2 ON u2.userName=w2.userName" +
+						 "WHERE u2.userName = ?" +
+						 "GROUP BY u2.userName";
+							
+			PreparedStatement stmt = conn.prepareStatement(sql);
+			stmt.setString(1, user_name);
+			ResultSet result = stmt.executeQuery();
+			String item;			
+			// Retrieve column data from resultset
+			if(!(item=result.getString(1)).isEmpty()){
+				profileMap.put(1, item); // Name
+			}
+			if(!(item=Integer.toString(result.getInt(4))).isEmpty()){
+				profileMap.put(2, item); // Number of wins
+			}
+			if(!(item=Integer.toString(result.getInt(3))).isEmpty()){
+				profileMap.put(3, item); // Number of games
+			}
+			if(!(item=Float.toString(result.getFloat(5))).isEmpty()){
+				profileMap.put(4, item); // Average time to win
+			}
+			if(!(item=Integer.toString(result.getInt(6))).isEmpty()){
+				profileMap.put(5, item); // Rank
+			}
+		}catch(Exception e){
+			System.err.println("[Server userProfileService]Exception thrown: "+e);
+		}
+		return profileMap;
+	}
+	
+	/* User leader board service: list top 10 players in order of ranking
+	 * Rank: determined by win# (heigher) and game# (lower)
+	 * Info: Rank, name, win#, game#, avg(winning time)
+	 */
+	public HashMap<Integer, ArrayList<String>> userLeaderBoardService(String user_name) throws RemoteException{
+		HashMap<Integer, ArrayList<String>> boardMap = new HashMap<Integer, ArrayList<String>>();
+		try{
+			String sql = "SELECT u2.userName,"
+							  + "u2.loginTime,"
+							  + "u2.gamePlayed,"
+							  + "COUNT(w2.winTime) as win,"
+							  + "AVG(w2.winTime) as avgWin,"
+							  + "(SELECT COUNT(*)"
+							   + "FROM (SELECT u1.userName AS name,"
+							   				+ "COUNT(w1.winTime) as win,"
+							   				+ "u1.gamePlayed,"
+							   				+ "AVG(w1.winTime) as avgWin"
+							   		 + "FROM userinfo AS u1 LEFT JOIN winhistory AS w1 ON u1.userName=w1.userName"
+							   		 + "GROUP BY u1.userName) t1"
+							  + "WHERE (t1.win > count(w2.winTime)) OR"
+							  		+ "(t1.win = count(w2.winTime) AND"
+							  		 + "t1.gamePlayed < u2.gamePlayed) OR"
+							  		+ "(t1.win = count(w2.winTime) AND"
+							  		 + "t1.gamePlayed = u2.gamePlayed AND"
+							  		 + "t1.avgWin < AVG(w2.winTime)))+1 as RANK"
+					   + "FROM userinfo AS u2 LEFT JOIN winhistory AS w2 ON u2.userName=w2.userName"
+					   + "GROUP BY u2.userName"
+					   + "ORDER BY RANK ASC";
+			
+			Statement stmt = conn.createStatement();
+			ResultSet rs = stmt.executeQuery(sql);
+			String item;	
+			ArrayList<String> player = new ArrayList<String>();
+			// Retrieve column data from resultset
+			int rows = 0;
+			if(rs.last()){
+				rows = rs.getRow();
+			}
+			int loops = 10;
+			if(rows < loops){
+				loops = rows;
+			}
+			rs.beforeFirst();
+			for(int i=0; i<loops; ++i){
+				if(rs.next()){
+					if(!(item=Integer.toString(rs.getInt(6))).isEmpty()){
+						player.add(item); // Rank is added
+					}else{
+						player.add("-");
+					}
+					if(!(item=rs.getString(1)).isEmpty()){
+						player.add(item); // Name is added
+					}else{
+						player.add("-");
+					}
+					if(!(item=Integer.toString(rs.getInt(4))).isEmpty()){
+						player.add(item); // Games won is added
+					}else{
+						player.add("-");
+					}
+					if(!(item=rs.getString(3)).isEmpty()){
+						player.add(item); // Games played is added
+					}else{
+						player.add("-");
+					}
+					if(!(item=Float.toString(rs.getFloat(5))).isEmpty()){
+						player.add(item); // Avg. winning time is added
+					}else{
+						player.add("-");
+					}
+					// single player info for leader board is done. Add player into map
+					boardMap.put(i, player);
+				}
+				
+			}
+			
+		}catch(Exception e){
+			System.err.println("[Server userProfileService]Exception thrown: "+e);
+		}
+				
+		return boardMap;
+	}
+	
+	
+	
+	/* Login service: verify user
+	 * return:	1: success
+	 * 			2: duplicating login
+	 * 			0: user doesn't exist
+	 * 			-1: invalid password
+	 * 			-2: unknown error
+	 */
+	public synchronized int loginService(String user_name, String password) throws RemoteException{
+		try{			
+			PreparedStatement stmt = conn.prepareStatement("SELECT password, loginTime FROM userinfo WHERE name = ?");
+			stmt.setString(1, user_name);
+			ResultSet rs = stmt.executeQuery();
+			String temp_password;
+			int temp_loginTime;
+			
+			if(rs.next()){// If client is valid, there should be only one row of result
+				temp_password = rs.getString("password");
+				temp_loginTime = rs.getInt("loginTime");
+				
+				if(temp_password.equals(password)){
+					// User is valid, need further check timestamp
+					if(temp_loginTime > startTime){ // Once log out, loginTime is set to 0
+						// Duplicate login
+						return 2;
+					}else{
+						// Update loginTime!
+						temp_loginTime = (int) (System.currentTimeMillis()/1000);
+						Statement s = conn.createStatement();
+						int row = s.executeUpdate("UPDATE userinfo SET loginTime="+String.valueOf(temp_loginTime)+" WHERE userName="+user_name);
+						
+						if(row == 1){
+							// Success login
+							++numOfClients;
+							System.out.println("[Server loginService]Login success and userinfo has been updated!");
+							return 1;
+						}else{
+							System.out.println("[Server loginService]Login fail coz userinfo cannot be updated!");
+							return -2;
+						}											
+					}
+				}else{
+					// Wrong password!
+					return -1;
+				}
+			}else{
+				// user doesn't exist
+				return 0;
+			}
+		}catch(Exception e){
+			System.err.println("[Server loginService]Exception thrown: "+e);
+			return -2;
+		}
+	}
+	
+	// Logout service: delete the specified user from OnlineUser.txt 	
+	public synchronized boolean logoutService(String user_name) throws RemoteException{
+		try{/*
+			String line;
+			ArrayList<String> data = new ArrayList<String>();
+			Scanner scan = new Scanner(new File("OnlineUser.txt"));
+			
+			while(scan.hasNextLine()){
+				line = scan.nextLine();
+				if(!line.equals(user_name)){
+					data.add(line);
+				}
+			}
+			scan.close();
+			
+			// Store online users' names except the one logging out and overwrite original file
+			PrintWriter out = new PrintWriter(new FileWriter("OnlineUser.txt", false));
+			if(!data.isEmpty()){
+				for(int i=0; i<data.size(); ++i){
+					out.println(data.get(i));
+				}
+			}else{
+				out.println("");
+			}
+			out.flush();
+			out.close();
+			
+			--numOfClients;
+			System.out.println("Logout " + user_name + " success! Number of online users: " + numOfClients);	
+			
+			return true;*/
+			
+			// loginTime in userinfo is set to 0
+			PreparedStatement stmt = conn.prepareStatement("UPDATE userinfo SET loginTime=0 WHERE userName=?");
+			stmt.setString(1, user_name);
+			int row = stmt.executeUpdate();
+			
+			if(row == 1){
+				return true;
+			}else{
+				System.out.println("[Server logoutService]User: " + user_name + "fail to logout!");
+				return false;
+			}
+		}catch(Exception e){
+			System.err.println("[Server logoutService]Exception thrown: "+e);
+			return false;
+		}	
+	}
+	
+	// Register service: avoid duplicating user name with UserInfo.txt
+	// also login user and update OnlineUser.txt
+	
+	/* Register service: avoid duplicating user name with UserInfo.txt
+	 * 					 also login user and update OnlineUser.txt
+	 * return:	1: success
+	 * 			2: duplicating name
+	 * 			-2: unknown error
+	 */
+	public synchronized int registerService(String user_name, String password) throws RemoteException{
+		try{/*
+			Scanner scan = new Scanner(new File("UserInfo.txt"));
+			String temp_name;
+			while(scan.hasNextLine()){
+				temp_name = scan.nextLine().split(" ")[0];				
+				if(temp_name.equals(user_name)){
+					System.out.println("Register: duplicating user name!");
+					scan.close();
+					return 2;
+				}
+			}
+			scan.close();
+			
+			// After duplication check, register user
+			PrintWriter out_register = new PrintWriter(new FileWriter("UserInfo.txt", true));
+			out_register.println(user_name + " " + password);
+			out_register.flush();
+			out_register.close();
+			
+			// After registration, login user
+			PrintWriter out_login = new PrintWriter(new FileWriter("OnlineUser.txt", true));
+			out_login.println(user_name);
+			out_login.flush();
+			out_login.close();
+			
+			++numOfClients;
+			System.out.println("Register: " + user_name + " success! Number of online users: " + numOfClients);
+			return 1;*/
+			
+			// Duplication check
+			PreparedStatement stmt = conn.prepareStatement("SELECT * FROM userinfo WHERE name = ?");
+			stmt.setString(1, user_name);
+			ResultSet rs = stmt.executeQuery();
+			
+			if(rs.next()){
+				// duplicating name
+				return 2;
+			}else{
+				// insert user into userinfo table. Login user
+				PreparedStatement insertstmt = conn.prepareStatement("INSERT INTO userinfo(userName, password, gamePlayed, loginTime) VLUES (?,?,?,?)");
+				insertstmt.setString(1, user_name);
+				insertstmt.setString(2, password);
+				Random random = new Random();
+				// randomly generate the number of gamePlayed in the range of [1, 10]
+				int gamePlayed = random.nextInt(10) + 1;
+				insertstmt.setInt(3, gamePlayed);
+				insertstmt.setInt(4, (int)(System.currentTimeMillis()/1000));
+				insertstmt.execute();
+				
+				// randomly generate a number of game winning records (<= gamePlayed)
+				int winningRecords = random.nextInt(gamePlayed) + 1;
+				// insert these winning records into winhistory
+				PreparedStatement historystmt;
+				float winTime;
+				for(int i=0; i<winningRecords; ++i){
+					// randomly set winTime [2, 15)
+					winTime = random.nextFloat()*13+2;
+					// insert into winhistory table
+					historystmt = conn.prepareStatement("INSERT INTO winhistory(userName, winTime) VALUES (?,?)");
+					historystmt.setString(1, user_name);
+					historystmt.setFloat(2, winTime);
+					historystmt.execute();
+					System.out.println("[Server registerService]Record created: " + Integer.toString(i));
+				}
+					
+				++numOfClients;
+				System.out.println("Register: " + user_name + " success! Number of online users: " + numOfClients);
+				return 1;
+			}			
+		}catch(Exception e){
+			System.err.println("[Server registerService]Exception thrown: "+e);
+			return -2;// problem here
+		}
+	}
+	
+	
+	
+	/*
+	// Helper of login service
+	private void updateOnlineUser(String user_name) {
+		try {
+			PrintWriter out = new PrintWriter(new FileWriter("OnlineUser.txt", true));
+			out.println(user_name);
+			out.flush();
+			out.close();
+		} catch(IOException e) {
+			System.err.println("[Server updateOnlineUser]Exception thrown: "+e);
+		}
+	}
+
+	// Helper of login service
+	// Policy: different users cannot have the same user_name
+	private boolean checkDuplication(String user_name) {
+		try{
+			Scanner scan = new Scanner(new File("OnlineUser.txt"));
+			String temp_name;
+			while(scan.hasNextLine()){
+				temp_name = scan.nextLine();				
+				if(temp_name.equals(user_name)){
+					scan.close();
+					return true;
+				}
+			}
+			scan.close();
+			return false;
+		}catch(IOException e){
+			System.err.println("[Server checkDuplication]Exception thrown: "+e);
+			return true;// problem here
+		}	
+	}*/
+	
+	
+}
