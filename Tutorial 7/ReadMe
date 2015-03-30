@@ -1,0 +1,9 @@
+1. Apache DS and Apache Directory Studio are needed. Download them first.
+
+2. In Help-> install new software -> add ->  
+Name & location: Apache Directory Studio Update Site & http://directory.apache.org/studio/update/2.x
+
+3. Window -> open perspective -> other -> LDAP
+
+Now the LDAP can be connected. Remember to start Apache DS first before “new connection”.
+You may use terminal to start Apache DS: sudo launchctl start org.apache.directory.server
